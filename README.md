@@ -1,6 +1,6 @@
 # Jira MCP Server
 
-A Model Context Protocol (MCP) server for Jira that provides tools for searching, retrieving, creating, and updating issues.
+I created my own workplace in Jira (https://akumunch.atlassian.net). This is a Model Context Protocol (MCP) server for Jira that provides tools for searching, retrieving, creating, and updating issues.
 
 ## Setup
 
