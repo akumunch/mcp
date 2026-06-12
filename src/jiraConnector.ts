@@ -25,6 +25,8 @@ export class JiraConnector {
 
   constructor() {
     const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.apiToken}`).toString("base64");
+    console.error("Jira auth email:", jiraConfig.email);
+    console.error("Jira base URL:", jiraConfig.baseUrl)
     this.client = axios.create({
       baseURL: `${jiraConfig.baseUrl}/rest/api/3`,
       headers: {
@@ -50,9 +52,34 @@ export class JiraConnector {
   }
 
   async createIssue(fields: JiraIssueFields): Promise<JiraIssue> {
-    const payload = { fields: { ...fields, project: { key: jiraConfig.projectKey } } };
+    const payload = {
+      fields: {
+        ...fields,
+        project: { key: jiraConfig.projectKey },
+        description: fields.description ? {
+          type: "doc",
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: fields.description}
+              ]
+            }
+          ]
+        } : undefined
+      }
+    };
+    try {
+    console.error("Jira payload:", JSON.stringify(payload, null, 2));
     const response = await this.client.post("/issue", payload);
     return response.data as JiraIssue;
+    } catch (error: any) {
+      console.error("Jira create error:", JSON.stringify(error?.response?.data, null, 2));
+      throw error;
+    }
   }
 
   async updateIssue(issueIdOrKey: string, fields: Partial<JiraIssueFields>): Promise<void> {
