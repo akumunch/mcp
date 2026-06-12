@@ -11,6 +11,10 @@ import { JiraConnector, JiraIssueFields } from "./jiraConnector.js";
 const server = new Server({
   name: "jira-mcp-server",
   version: "0.1.0",
+}, {
+  capabilities: {
+    tools: {}
+  }
 });
 
 const jira = new JiraConnector();
