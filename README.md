@@ -1,73 +1,85 @@
 # Jira MCP Server
 
-I created my own workplace in Jira (https://akumunch.atlassian.net). This is a Model Context Protocol (MCP) server for Jira that provides tools for searching, retrieving, creating, and updating issues.
+A custom Model Context Protocol (MCP) server for Jira that provides tools for searching, retrieving, creating, and updating issues. Also includes a GitHub-Jira orchestrator for creating linked tickets across both platforms simultaneously.
 
 ## Setup
 
-1. Copy `.env.example` to `.env`.
-2. Fill in `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and `JIRA_PROJECT_KEY`.
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Build the project:
-   ```bash
-   npm run build
-   ```
+1. Copy `.env.example` to `.env`
+2. Fill in your credentials:
 
-## Usage
+| Variable | Description |
+|---|---|
+| `JIRA_BASE_URL` | Your Jira site URL (e.g. `https://yoursite.atlassian.net`) |
+| `JIRA_EMAIL` | Your Atlassian account email |
+| `JIRA_API_TOKEN` | API token from id.atlassian.com |
+| `JIRA_PROJECT_KEY` | Your project key (e.g. `SCRUM`) |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub PAT with `repo` scope |
+| `GITHUB_REPO_OWNER` | GitHub username |
+| `GITHUB_REPO_NAME` | Repository name |
 
-This is an MCP server designed to be used with Claude or other MCP clients.
-
-### Local Testing
+3. Install dependencies and build:
 ```bash
-npm start
+   npm install && npm run build
 ```
 
-### Integration with Claude
+## MCP Server Usage
 
-Add to your `claude_desktop_config.json`:
+### VS Code (Copilot)
+Add to your `mcp.json`:
 ```json
 {
-  "mcpServers": {
-    "jira": {
+  "servers": {
+    "jira-mcp-server": {
+      "type": "stdio",
       "command": "node",
-      "args": ["/path/to/dist/server.js"],
-      "env": {
-        "JIRA_BASE_URL": "https://akumunch.atlassian.net",
-        "JIRA_EMAIL": "your-email@example.com",
-        "JIRA_API_TOKEN": "your-api-token",
-        "JIRA_PROJECT_KEY": "SCRUM"
-      }
+      "args": ["/path/to/dist/server.js"]
     }
   }
 }
 ```
 
+### Claude Desktop
+Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "command": "node",
+      "args": ["/path/to/dist/server.js"]
+    }
+  }
+}
+```
+
+### Testing with MCP Inspector
+```bash
+npx @modelcontextprotocol/inspector node dist/server.js
+```
+
 ## Available Tools
 
-- **search_issues** — Search for Jira issues using JQL query
-  - Input: `jql` (required), `maxResults` (optional, default: 50)
-
-- **get_issue** — Get details of a specific issue
-  - Input: `issueId` (required)
-
+- **search_issues** — Search Jira issues using JQL
+- **get_issue** — Get details of a specific issue by key (e.g. `SCRUM-1`)
 - **create_issue** — Create a new Jira issue
-  - Input: `summary` (required), `issueType` (required), `description` (optional)
-
 - **update_issue** — Update an existing issue
-  - Input: `issueId` (required), `summary` (optional), `description` (optional)
+
+## GitHub-Jira Orchestrator
+
+Creates a linked ticket in both GitHub and Jira with a single command:
+
+```bash
+node dist/orchestrator.js "Issue title" "Description"
+```
 
 ## Development
 
-Run with automatic reload:
 ```bash
-npm run dev
+npm run dev   # run with auto-reload
+npm run build # compile TypeScript
 ```
 
 ## Notes
 
-This implementation uses:
-- Model Context Protocol (MCP) v0.7.1 for standardized client-server communication
-- Jira Cloud API token authentication
-- JSON-RPC over stdio transport
+- Uses stdio transport (JSON-RPC over stdin/stdout)
+- Jira API v3 with Basic Auth (email + API token)
+- Description fields use Atlassian Document Format (ADF)
