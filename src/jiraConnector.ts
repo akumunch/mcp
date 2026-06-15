@@ -6,6 +6,10 @@ export interface JiraIssueFields {
   description?: string;
   issuetype: { name: string };
   project: { key: string };
+  priority?: { name: string };
+  labels?: string[];
+  assignee?: { name: string };
+  customfield_sprint?: string;
   [key: string]: unknown;
 }
 
@@ -37,11 +41,12 @@ export class JiraConnector {
     });
   }
 
-  async searchIssues(jql = `project = ${jiraConfig.projectKey}`, maxResults = 50): Promise<JiraSearchResult> {
+  async searchIssues(query: string, jql?: string, maxResults = 50): Promise<JiraSearchResult> {
+    const effectiveJql = jql || this.buildJqlFromNaturalLanguage(query);
     const response = await this.client.post("/search/jql", {
-      jql,
+      jql: effectiveJql,
       maxResults,
-      fields: ["summary", "description", "issuetype", "project"]
+      fields: ["summary", "description", "issuetype", "project", "status", "priority", "labels", "assignee"],
     });
     return response.data as JiraSearchResult;
   }
@@ -82,7 +87,43 @@ export class JiraConnector {
     }
   }
 
-  async updateIssue(issueIdOrKey: string, fields: Partial<JiraIssueFields>): Promise<void> {
-    await this.client.put(`/issue/${encodeURIComponent(issueIdOrKey)}`, { fields });
+  async updateIssue(issueIdOrKey: string, fields: Partial<JiraIssueFields>, comment?: string, status?: string): Promise<void> {
+    const issueKey = encodeURIComponent(issueIdOrKey);
+    if (Object.keys(fields).length > 0) {
+      await this.client.put(`/issue/${issueKey}`, { fields });
+    }
+    if (status) {
+      await this.transitionIssue(issueIdOrKey, status);
+    }
+    if (comment) {
+      await this.client.post(`/issue/${issueKey}/comment`, { body: comment });
+    }
+  }
+
+  private async transitionIssue(issueIdOrKey: string, statusName: string): Promise<void> {
+    const response = await this.client.get(`/issue/${encodeURIComponent(issueIdOrKey)}/transitions`);
+    const transitions = response.data?.transitions ?? [];
+    const transition = transitions.find((t: any) => String(t.name).toLowerCase() === statusName.toLowerCase());
+    if (!transition) {
+      throw new Error(`Transition '${statusName}' not available for issue ${issueIdOrKey}.`);
+    }
+    await this.client.post(`/issue/${encodeURIComponent(issueIdOrKey)}/transitions`, {
+      transition: { id: transition.id },
+    });
+  }
+
+  private buildJqlFromNaturalLanguage(query: string): string {
+    const trimmed = query?.trim();
+    if (!trimmed) {
+      return `project = ${jiraConfig.projectKey}`;
+    }
+
+    const isLikelyJql = /\b(project|status|labels|sprint|assignee|priority|text|summary|description|AND|OR|NOT)\b/i.test(trimmed) && /[=~<>]/.test(trimmed);
+    if (isLikelyJql) {
+      return trimmed;
+    }
+
+    const escaped = trimmed.replace(/["\\]/g, "\\$&");
+    return `project = ${jiraConfig.projectKey} AND text ~ "${escaped}"`;
   }
 }

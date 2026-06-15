@@ -5,72 +5,104 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as Ajv from "ajv";
+import * as addFormats from "ajv-formats";
 import { jiraConfig } from "./config.js";
 import { JiraConnector, JiraIssueFields } from "./jiraConnector.js";
 
-const server = new Server({
-  name: "jira-mcp-server",
-  version: "0.1.0",
-}, {
-  capabilities: {
-    tools: {}
+const server = new Server(
+  {
+    name: "jira-mcp-server",
+    version: "0.2.0",
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
   }
-});
+);
 
 const jira = new JiraConnector();
 
-// Define MCP tools
 const tools: Tool[] = [
   {
     name: "search_issues",
-    description: "Search for Jira issues using JQL query",
+    description:
+      "Search Jira issues by a natural-language filter or JQL. Returns summary, key, status, assignee, priority, labels, and a text snippet from the description.",
     inputSchema: {
       type: "object",
       properties: {
+        query: {
+          type: "string",
+          description:
+            "Natural-language search filters such as status, sprint, assignee, label, priority, or a free-text search. Example: 'open sprint issues involving authentication'.",
+        },
         jql: {
           type: "string",
-          description: "JQL query string (e.g., 'project = SCRUM')",
+          description:
+            "Optional Jira Query Language expression to precisely filter issues. If provided, this overrides the natural-language query.",
         },
         maxResults: {
-          type: "number",
-          description: "Maximum number of results to return",
+          type: "integer",
+          description: "Maximum number of issues to return.",
           default: 50,
+          minimum: 1,
+          maximum: 100,
         },
       },
-      required: ["jql"],
+      required: ["query"],
     },
   },
   {
     name: "get_issue",
-    description: "Get details of a specific Jira issue",
+    description:
+      "Fetch the full details for a Jira issue by its ID or key. Use this when you need issue summary, description, status, priority, labels, assignee, and links.",
     inputSchema: {
       type: "object",
       properties: {
-        issueId: {
+        issueIdOrKey: {
           type: "string",
-          description: "Issue ID or key (e.g., 'SCRUM-123')",
+          description: "Jira issue ID or key, for example SCRUM-123.",
         },
       },
-      required: ["issueId"],
+      required: ["issueIdOrKey"],
     },
   },
   {
     name: "create_issue",
-    description: "Create a new Jira issue",
+    description:
+      "Create a Jira issue with title, description, issue type, priority, labels, sprint, assignee, and an optional natural-language request for the issue description.",
     inputSchema: {
       type: "object",
       properties: {
         summary: {
           type: "string",
-          description: "Issue summary/title",
+          description: "The issue title.",
         },
         description: {
           type: "string",
-          description: "Issue description",
+          description: "A longer description of the problem or task.",
         },
         issueType: {
           type: "string",
-          description: "Issue type name (e.g., 'Task', 'Bug', 'Story')",
+          description: "Jira issue type such as Task, Bug, Story, or Epic.",
+        },
+        priority: {
+          type: "string",
+          description: "Optional priority, such as Highest, High, Medium, Low.",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional labels to attach to the issue.",
+        },
+        sprint: {
+          type: "string",
+          description: "Optional sprint name or ID to assign the issue.",
+        },
+        assignee: {
+          type: "string",
+          description: "Optional assignee username or email.",
         },
       },
       required: ["summary", "issueType"],
@@ -78,43 +110,104 @@ const tools: Tool[] = [
   },
   {
     name: "update_issue",
-    description: "Update an existing Jira issue",
+    description:
+      "Update a Jira issue by key or ID. Use this to change summary, description, status, priority, labels, assignee, or to add a comment.",
     inputSchema: {
       type: "object",
       properties: {
-        issueId: {
+        issueIdOrKey: {
           type: "string",
-          description: "Issue ID or key",
+          description: "Jira issue ID or key, for example SCRUM-123.",
         },
         summary: {
           type: "string",
-          description: "New issue summary",
+          description: "Updated issue summary.",
         },
         description: {
           type: "string",
-          description: "New issue description",
+          description: "Updated issue description.",
+        },
+        status: {
+          type: "string",
+          description: "Optional status name to transition the issue to if supported by the project workflow.",
+        },
+        priority: {
+          type: "string",
+          description: "Optional priority such as Highest, High, Medium, Low.",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional labels to replace or add to the issue.",
+        },
+        assignee: {
+          type: "string",
+          description: "Optional assignee username or email.",
+        },
+        comment: {
+          type: "string",
+          description: "Optional comment to add to the issue.",
         },
       },
-      required: ["issueId"],
+      required: ["issueIdOrKey"],
     },
   },
 ];
 
-// Handler for listing available tools
+const AjvConstructor = (Ajv as any).default ?? Ajv;
+const addFormatsFn = (addFormats as any).default ?? addFormats;
+const ajv = new AjvConstructor({ allErrors: true, strict: false });
+addFormatsFn(ajv);
+
+function validateToolArgs(tool: Tool, args: unknown): { valid: boolean; errors?: string } {
+  if (!tool.inputSchema) {
+    return { valid: true };
+  }
+  const validate = ajv.compile(tool.inputSchema);
+  const valid = validate(args);
+  return {
+    valid: Boolean(valid),
+    errors: valid ? undefined : ajv.errorsText(validate.errors, { separator: "; " }),
+  };
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools,
 }));
 
-// Handler for calling tools
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
+    const tool = tools.find((tool) => tool.name === request.params.name);
+    if (!tool) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Unknown tool: ${request.params.name}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const validation = validateToolArgs(tool, request.params.arguments ?? {});
+    if (!validation.valid) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Invalid tool arguments: ${validation.errors}`,
+          },
+        ],
+        isError: true,
+      };
+    }
     const { name, arguments: args } = request.params;
-
     switch (name) {
       case "search_issues": {
-        const jql = (args?.jql as string) || `project = ${jiraConfig.projectKey}`;
-        const maxResults = (args?.maxResults as number) || 50;
-        const result = await jira.searchIssues(jql, maxResults);
+        const query = (args?.query as string) || "";
+        const jql = args?.jql as string | undefined;
+        const maxResults = typeof args?.maxResults === "number" ? args.maxResults : 50;
+        const result = await jira.searchIssues(query, jql, maxResults);
         return {
           content: [
             {
@@ -126,19 +219,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_issue": {
-        const issueId = args?.issueId as string;
-        if (!issueId) {
+        const issueIdOrKey = args?.issueIdOrKey as string;
+        if (!issueIdOrKey) {
           return {
             content: [
               {
                 type: "text",
-                text: "Error: issueId is required",
+                text: "Error: issueIdOrKey is required",
               },
             ],
             isError: true,
           };
         }
-        const issue = await jira.getIssue(issueId);
+        const issue = await jira.getIssue(issueIdOrKey);
         return {
           content: [
             {
@@ -153,6 +246,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const summary = args?.summary as string;
         const description = args?.description as string;
         const issueType = args?.issueType as string;
+        const priority = args?.priority as string;
+        const labels = Array.isArray(args?.labels) ? args.labels.map(String) : undefined;
+        const sprint = args?.sprint as string;
+        const assignee = args?.assignee as string;
 
         if (!summary || !issueType) {
           return {
@@ -171,6 +268,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           description,
           issuetype: { name: issueType },
           project: { key: jiraConfig.projectKey },
+          priority: priority ? { name: priority } : undefined,
+          labels,
+          customfield_sprint: sprint,
+          assignee: assignee ? { name: assignee } : undefined,
         };
 
         const issue = await jira.createIssue(fields);
@@ -185,32 +286,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "update_issue": {
-        const issueId = args?.issueId as string;
-        const summary = args?.summary as string;
-        const description = args?.description as string;
-
-        if (!issueId) {
+        const issueIdOrKey = args?.issueIdOrKey as string;
+        if (!issueIdOrKey) {
           return {
             content: [
               {
                 type: "text",
-                text: "Error: issueId is required",
+                text: "Error: issueIdOrKey is required",
               },
             ],
             isError: true,
           };
         }
 
-        const updates: Partial<JiraIssueFields> = {};
-        if (summary) updates.summary = summary;
-        if (description) updates.description = description;
+        const fields: Partial<JiraIssueFields> = {};
+        if (args?.summary) fields.summary = args.summary as string;
+        if (args?.description) fields.description = args.description as string;
+        if (args?.priority) fields.priority = { name: args.priority as string };
+        if (Array.isArray(args?.labels)) fields.labels = args.labels.map(String);
+        if (args?.assignee) fields.assignee = { name: args.assignee as string };
+        if (args?.sprint) fields.customfield_sprint = args.sprint as string;
 
-        await jira.updateIssue(issueId, updates);
+        const comment = args?.comment as string | undefined;
+        await jira.updateIssue(issueIdOrKey, fields, comment);
         return {
           content: [
             {
               type: "text",
-              text: `Issue ${issueId} updated successfully`,
+              text: `Issue ${issueIdOrKey} updated successfully`,
             },
           ],
         };
@@ -240,7 +343,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// Start the server
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -36,6 +36,17 @@ export const jiraConfig: JiraConfig = {
   port: Number(process.env.PORT ?? 4000)
 };
 
+export interface GeminiConfig {
+  apiKey: string;
+  model: string;
+}
+
+export const geminiConfig: GeminiConfig = {
+  apiKey: process.env.GEMINI_API_KEY ?? "",
+  model:
+    process.env.GEMINI_MODEL ?? process.env.GEMINI_MODEL_NAME ?? "gemini-2.5-flash",
+};
+
 export interface GitHubConfig {
   personalAccessToken: string;
   repoOwner: string;

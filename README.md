@@ -17,6 +17,9 @@ A custom Model Context Protocol (MCP) server for Jira that provides tools for se
 | `GITHUB_REPO_OWNER` | GitHub username |
 | `GITHUB_REPO_NAME` | Repository name |
 
+| `GEMINI_API_KEY` | Gemini API key for the planner agent |
+| `GEMINI_MODEL` | Optional Gemini model name (default `gemini-2.5-flash`) |
+
 3. Install dependencies and build:
 ```bash
    npm install && npm run build
@@ -62,8 +65,25 @@ npx @modelcontextprotocol/inspector node dist/server.js
 - **get_issue** — Get details of a specific issue by key (e.g. `SCRUM-1`)
 - **create_issue** — Create a new Jira issue
 - **update_issue** — Update an existing issue
+ - **search_issues** — Find Jira issues by natural-language or JQL filters, optionally limiting by status, sprint, assignee, labels, priority, or text.
+ - **get_issue** — Load a Jira issue by ID or key and return title, description, status, priority, and linked fields.
+ - **create_issue** — Open a Jira issue with title, description, issue type, priority, labels, and optional sprint or assignee.
+ - **update_issue** — Change a Jira issue summary, description, status, priority, labels, or add comments.
 
-## GitHub-Jira Orchestrator
+## AI Planner / Agent
+
+The project now supports natural-language Jira commands through an LLM planner. The agent discovers available MCP tools from `dist/server.js`, chooses the best tool(s), and executes them.
+
+Example CLI usage:
+
+```bash
+node dist/agent.js "create a bug for PDF extraction failures"
+node dist/agent.js "show me all open sprint issues"
+node dist/agent.js "update SCRUM-123 and mark it blocked"
+node dist/agent.js "find tickets related to authentication"
+```
+
+The MCP server remains tool-only. The planner agent handles intent, tool selection, and result aggregation.
 
 Creates a linked ticket in both GitHub and Jira with a single command:
 
