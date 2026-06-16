@@ -1,105 +1,217 @@
-# Jira MCP Server
+# Jira MCP Agent
 
-A custom Model Context Protocol (MCP) server for Jira that provides tools for searching, retrieving, creating, and updating issues. Also includes a GitHub-Jira orchestrator for creating linked tickets across both platforms simultaneously.
+An intelligent Python-based MCP agent that leverages Atlassian Rovo MCP for seamless Jira integration. Combines natural language processing via Google Gemini with Jira's MCP tools to enable intuitive task management, issue search, and workflow automation.
 
 ## Setup
 
 1. Copy `.env.example` to `.env`
 2. Fill in your credentials:
 
-| Variable | Description |
-|---|---|
-| `JIRA_BASE_URL` | Your Jira site URL (e.g. `https://yoursite.atlassian.net`) |
-| `JIRA_EMAIL` | Your Atlassian account email |
-| `JIRA_API_TOKEN` | API token from id.atlassian.com |
-| `JIRA_PROJECT_KEY` | Your project key (e.g. `SCRUM`) |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub PAT with `repo` scope |
-| `GITHUB_REPO_OWNER` | GitHub username |
-| `GITHUB_REPO_NAME` | Repository name |
+### Atlassian / Jira Configuration
 
-| `GEMINI_API_KEY` | Gemini API key for the planner agent |
-| `GEMINI_MODEL` | Optional Gemini model name (default `gemini-2.5-flash`) |
+| Variable | Description | Required |
+|---|---|---|
+| `JIRA_EMAIL` | Your Atlassian account email | Yes (for Basic auth) |
+| `ATLASSIAN_MCP_TOKEN` | API token from id.atlassian.com | Yes (for Basic auth) |
+| `JIRA_BASE_URL` | Your Jira site URL (e.g. `https://yoursite.atlassian.net`) | Optional |
+| `ROVO_CLOUD_ID` | Cloud ID for Rovo MCP (overrides JIRA_BASE_URL) | Recommended |
 
-3. Install dependencies and build:
+### Rovo MCP Configuration
+
+| Variable | Description | Default |
+|---|---|---|
+| `ROVO_MCP_URL` | Rovo MCP endpoint | `https://mcp.atlassian.com/v1/mcp` |
+| `ROVO_MCP_AUTH_MODE` | Authentication mode (`basic`, `bearer`, or `oauth`) | `basic` |
+| `ROVO_MCP_BEARER_TOKEN` | Bearer token for token-based auth | - |
+| `ROVO_MCP_COMMAND` | Command to run mcp-remote (for stdio transport) | - |
+| `ROVO_MCP_ARGS` | Arguments for mcp-remote | - |
+
+### AI Planner Configuration
+
+| Variable | Description | Required |
+|---|---|---|
+| `GEMINI_API_KEY` | Google Gemini API key | Yes |
+| `GEMINI_MODEL_NAME` | Gemini model (e.g. `gemini-2.5-flash`) | No, defaults to `gemini-2.5-flash` |
+
+3. Install dependencies:
 ```bash
-   npm install && npm run build
+pip install -r requirements.txt
+npm install
 ```
 
-## MCP Server Usage
+## Usage
 
-### VS Code (Copilot)
-Add to your `mcp.json`:
-```json
-{
-  "servers": {
-    "jira-mcp-server": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/dist/server.js"]
-    }
-  }
-}
-```
+### Python Agent CLI
 
-### Claude Desktop
-Add to `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "jira": {
-      "command": "node",
-      "args": ["/path/to/dist/server.js"]
-    }
-  }
-}
-```
+Run natural language commands to interact with Jira:
 
-### Testing with MCP Inspector
 ```bash
-npx @modelcontextprotocol/inspector node dist/server.js
+python agent.py "create a bug for OAuth failures"
+python agent.py "show me all open SCRUM issues"
+python agent.py "get issue SCRUM-1"
+python agent.py "find tickets related to authentication"
+python agent.py "update SCRUM-123 and add a comment saying completed"
+```
+
+The agent automatically:
+- **Discovers** all available Rovo MCP tools
+- **Plans** the best tool(s) to use for your request using Gemini AI
+- **Executes** the actions with proper parameters
+- **Formats** the results for easy reading
+
+### Transport Modes
+
+The agent supports two connection modes:
+
+#### 1. **HTTP Transport** (Default)
+Direct HTTP connection to Rovo MCP with Basic or Bearer authentication.
+
+```env
+ROVO_MCP_AUTH_MODE=basic
+# or
+ROVO_MCP_AUTH_MODE=bearer
+ROVO_MCP_BEARER_TOKEN=your_token
+```
+
+#### 2. **Stdio Transport** (OAuth Support)
+Spawns `mcp-remote` for OAuth-based authentication with browser login.
+
+```env
+ROVO_MCP_COMMAND=mcp-remote
+ROVO_MCP_ARGS=--protocol-version 2024-11-05 --auth oauth
 ```
 
 ## Available Tools
 
-- **search_issues** — Search Jira issues using JQL
-- **get_issue** — Get details of a specific issue by key (e.g. `SCRUM-1`)
-- **create_issue** — Create a new Jira issue
-- **update_issue** — Update an existing issue
- - **search_issues** — Find Jira issues by natural-language or JQL filters, optionally limiting by status, sprint, assignee, labels, priority, or text.
- - **get_issue** — Load a Jira issue by ID or key and return title, description, status, priority, and linked fields.
- - **create_issue** — Open a Jira issue with title, description, issue type, priority, labels, and optional sprint or assignee.
- - **update_issue** — Change a Jira issue summary, description, status, priority, labels, or add comments.
+The agent automatically discovers all tools from Atlassian Rovo MCP. Common tools include:
 
-## AI Planner / Agent
+- **searchJiraIssuesUsingJql** — Search Jira issues using JQL filters or natural language
+- **getIssue** — Retrieve detailed information about a specific Jira issue
+- **createIssue** — Create a new Jira issue with title, description, type, priority, labels
+- **updateIssue** — Update issue summary, description, status, priority, labels, or add comments
+- **editJiraIssue** — Edit existing Jira issue fields
+- **addWorklogToJiraIssue** — Add time tracking entries to issues
+- **addCommentToJiraIssue** — Add comments to issues
 
-The project now supports natural-language Jira commands through an LLM planner. The agent discovers available MCP tools from `dist/server.js`, chooses the best tool(s), and executes them.
-
-Example CLI usage:
-
+For the complete list of available tools, run:
 ```bash
-node dist/agent.js "create a bug for PDF extraction failures"
-node dist/agent.js "show me all open sprint issues"
-node dist/agent.js "update SCRUM-123 and mark it blocked"
-node dist/agent.js "find tickets related to authentication"
+python agent.py "list all available tools"
 ```
 
-The MCP server remains tool-only. The planner agent handles intent, tool selection, and result aggregation.
+## Architecture
 
-Creates a linked ticket in both GitHub and Jira with a single command:
+### How It Works
 
-```bash
-node dist/orchestrator.js "Issue title" "Description"
 ```
+┌─────────────────────────────────────┐
+│  Python Agent (agent.py)            │
+│  • CLI interface                    │
+│  • Argument parsing                 │
+└────────────────┬────────────────────┘
+                 │
+     ┌───────────▼───────────┐
+     │  Jira MCP Client      │
+     │  • Tool discovery     │
+     │  • Transport selection│
+     └───────────┬───────────┘
+                 │
+     ┌───────────▼──────────────────┐
+     │  Gemini Planner Agent        │
+     │  • Intent understanding      │
+     │  • Tool selection & planning │
+     │  • Argument generation       │
+     └───────────┬──────────────────┘
+                 │
+     ┌───────────▼──────────────────────────────┐
+     │  Atlassian Rovo MCP                      │
+     │  (HTTP or Stdio Transport)               │
+     │  • Auth: Basic, Bearer, or OAuth         │
+     └───────────┬──────────────────────────────┘
+                 │
+     ┌───────────▼──────────────────┐
+     │  Jira Cloud (Atlassian)      │
+     │  • Issues                    │
+     │  • Comments                  │
+     │  • Time tracking             │
+     └──────────────────────────────┘
+```
+
+### Key Components
+
+1. **agent.py** — Main CLI entry point
+   - Parses natural language requests
+   - Orchestrates the MCP client and Gemini planner
+   - Formats and displays results
+
+2. **config.py** — Configuration management
+   - Loads environment variables
+   - Supports multiple auth modes
+   - Configures transport selection
+
+3. **Jira MCP Client** — Handles communication
+   - Supports HTTP and stdio transports
+   - Auto-injects cloud ID for tool calls
+   - Manages session lifecycle
 
 ## Development
 
+### Python Agent Development
+
 ```bash
-npm run dev   # run with auto-reload
-npm run build # compile TypeScript
+# Run agent locally
+python agent.py "your request here"
+
+# Debug mode (see planning output)
+python agent.py "list all tools"
 ```
 
-## Notes
+### Requirements
 
-- Uses stdio transport (JSON-RPC over stdin/stdout)
-- Jira API v3 with Basic Auth (email + API token)
-- Description fields use Atlassian Document Format (ADF)
+- Python 3.8+
+- Node.js 18+ (optional, for legacy TypeScript components)
+- `httpx` — Async HTTP client for Rovo MCP communication
+- `google-generativeai` or direct API calls — For Gemini planning
+- `python-dotenv` — For environment configuration
+
+### Project Structure
+
+```
+.
+├── agent.py           # Main CLI agent
+├── config.py          # Configuration management
+├── package.json       # Node.js dependencies (legacy)
+├── README.md          # This file
+├── .env.example       # Environment template
+└── node_modules/      # TypeScript server (legacy, not used by Python agent)
+```
+
+## Technical Details
+
+- **MCP Protocol** — Uses Model Context Protocol to communicate with Atlassian Rovo MCP
+- **Transport** — Supports both HTTP (direct) and stdio (subprocess) transports
+- **Authentication**:
+  - **Basic Auth** — Email + API token (no browser needed)
+  - **Bearer Token** — Direct token-based auth
+  - **OAuth** — Browser-based login via mcp-remote
+- **LLM Planner** — Google Gemini 2.5 Flash analyzes requests and selects optimal tools
+- **Cloud ID Injection** — Automatically injects cloudId into all tool calls, simplifying requests
+- **Async/Await** — Full async implementation for fast, non-blocking I/O
+- **Dynamic Tool Discovery** — Automatically adapts to new Rovo MCP tools without code changes
+
+## Example Workflows
+
+### 1. Create and Link an Issue
+```bash
+python agent.py "create a critical bug about login failures"
+```
+
+### 2. Search and Update
+```bash
+python agent.py "find all SCRUM issues assigned to me"
+python agent.py "update SCRUM-456 to in progress and add comment saying started work"
+```
+
+### 3. Bulk Operations
+```bash
+python agent.py "show all high priority issues in the current sprint"
+```
