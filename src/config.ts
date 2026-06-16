@@ -8,7 +8,7 @@ dotenv.config({ path: resolve(__dirname, "../.env") });
 const requiredEnv = [
   "JIRA_BASE_URL",
   "JIRA_EMAIL",
-  "JIRA_API_TOKEN",
+  "ATLASSIAN_MCP_TOKEN",
   "JIRA_PROJECT_KEY"
 ];
 
@@ -30,7 +30,7 @@ export interface JiraConfig {
 export const jiraConfig: JiraConfig = {
   baseUrl: process.env.JIRA_BASE_URL as string,
   email: process.env.JIRA_EMAIL as string,
-  apiToken: process.env.JIRA_API_TOKEN as string,
+  apiToken: process.env.ATLASSIAN_MCP_TOKEN as string,
   projectKey: process.env.JIRA_PROJECT_KEY as string,
   issueType: process.env.JIRA_ISSUE_TYPE ?? "Task",
   port: Number(process.env.PORT ?? 4000)
