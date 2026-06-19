@@ -1,217 +1,173 @@
-# Jira MCP Agent
+# Personal MCP Agent
 
-An intelligent Python-based MCP agent that leverages Atlassian Rovo MCP for seamless Jira integration. Combines natural language processing via Google Gemini with Jira's MCP tools to enable intuitive task management, issue search, and workflow automation.
+An intelligent Python-based agent that uses Google Gemini as a planner to route natural-language requests across three MCP servers: **Jira**, **Google Calendar**, and **Slack**.
 
 ## Setup
 
 1. Copy `.env.example` to `.env`
-2. Fill in your credentials:
-
-### Atlassian / Jira Configuration
-
-| Variable | Description | Required |
-|---|---|---|
-| `JIRA_EMAIL` | Your Atlassian account email | Yes (for Basic auth) |
-| `ATLASSIAN_MCP_TOKEN` | API token from id.atlassian.com | Yes (for Basic auth) |
-| `JIRA_BASE_URL` | Your Jira site URL (e.g. `https://yoursite.atlassian.net`) | Optional |
-| `ROVO_CLOUD_ID` | Cloud ID for Rovo MCP (overrides JIRA_BASE_URL) | Recommended |
-
-### Rovo MCP Configuration
-
-| Variable | Description | Default |
-|---|---|---|
-| `ROVO_MCP_URL` | Rovo MCP endpoint | `https://mcp.atlassian.com/v1/mcp` |
-| `ROVO_MCP_AUTH_MODE` | Authentication mode (`basic`, `bearer`, or `oauth`) | `basic` |
-| `ROVO_MCP_BEARER_TOKEN` | Bearer token for token-based auth | - |
-| `ROVO_MCP_COMMAND` | Command to run mcp-remote (for stdio transport) | - |
-| `ROVO_MCP_ARGS` | Arguments for mcp-remote | - |
-
-### AI Planner Configuration
-
-| Variable | Description | Required |
-|---|---|---|
-| `GEMINI_API_KEY` | Google Gemini API key | Yes |
-| `GEMINI_MODEL_NAME` | Gemini model (e.g. `gemini-2.5-flash`) | No, defaults to `gemini-2.5-flash` |
-
+2. Fill in your credentials (see sections below for each service)
 3. Install dependencies:
 ```bash
 pip install -r requirements.txt
-npm install
-```
-
-## Usage
-
-### Python Agent CLI
-
-Run natural language commands to interact with Jira:
-
-```bash
-python agent.py "create a bug for OAuth failures"
-python agent.py "show me all open SCRUM issues"
-python agent.py "get issue SCRUM-1"
-python agent.py "find tickets related to authentication"
-python agent.py "update SCRUM-123 and add a comment saying completed"
-```
-
-The agent automatically:
-- **Discovers** all available Rovo MCP tools
-- **Plans** the best tool(s) to use for your request using Gemini AI
-- **Executes** the actions with proper parameters
-- **Formats** the results for easy reading
-
-### Transport Modes
-
-The agent supports two connection modes:
-
-#### 1. **HTTP Transport** (Default)
-Direct HTTP connection to Rovo MCP with Basic or Bearer authentication.
-
-```env
-ROVO_MCP_AUTH_MODE=basic
-# or
-ROVO_MCP_AUTH_MODE=bearer
-ROVO_MCP_BEARER_TOKEN=your_token
-```
-
-#### 2. **Stdio Transport** (OAuth Support)
-Spawns `mcp-remote` for OAuth-based authentication with browser login.
-
-```env
-ROVO_MCP_COMMAND=mcp-remote
-ROVO_MCP_ARGS=--protocol-version 2024-11-05 --auth oauth
-```
-
-## Available Tools
-
-The agent automatically discovers all tools from Atlassian Rovo MCP. Common tools include:
-
-- **searchJiraIssuesUsingJql** — Search Jira issues using JQL filters or natural language
-- **getIssue** — Retrieve detailed information about a specific Jira issue
-- **createIssue** — Create a new Jira issue with title, description, type, priority, labels
-- **updateIssue** — Update issue summary, description, status, priority, labels, or add comments
-- **editJiraIssue** — Edit existing Jira issue fields
-- **addWorklogToJiraIssue** — Add time tracking entries to issues
-- **addCommentToJiraIssue** — Add comments to issues
-
-For the complete list of available tools, run:
-```bash
-python agent.py "list all available tools"
 ```
 
 ## Architecture
-
-### How It Works
 
 ```
 ┌─────────────────────────────────────┐
 │  Python Agent (agent.py)            │
 │  • CLI interface                    │
-│  • Argument parsing                 │
+│  • Gemini planner & re-planner      │
 └────────────────┬────────────────────┘
                  │
      ┌───────────▼───────────┐
-     │  Jira MCP Client      │
-     │  • Tool discovery     │
-     │  • Transport selection│
-     └───────────┬───────────┘
+     │  Tool Registry         │
+     │  (registry.py)         │
+     │  • Discovers tools     │
+     │    across all servers  │
+     └───────────┬────────────┘
                  │
-     ┌───────────▼──────────────────┐
-     │  Gemini Planner Agent        │
-     │  • Intent understanding      │
-     │  • Tool selection & planning │
-     │  • Argument generation       │
-     └───────────┬──────────────────┘
-                 │
-     ┌───────────▼──────────────────────────────┐
-     │  Atlassian Rovo MCP                      │
-     │  (HTTP or Stdio Transport)               │
-     │  • Auth: Basic, Bearer, or OAuth         │
-     └───────────┬──────────────────────────────┘
-                 │
-     ┌───────────▼──────────────────┐
-     │  Jira Cloud (Atlassian)      │
-     │  • Issues                    │
-     │  • Comments                  │
-     │  • Time tracking             │
-     └──────────────────────────────┘
+   ┌─────────────┼──────────────┐
+   │             │              │
+┌──▼───┐    ┌────▼─────┐   ┌────▼────┐
+│ Jira │    │ Google   │   │ Slack   │
+│ MCP  │    │ Calendar │   │ MCP     │
+│      │    │ MCP      │   │         │
+└──────┘    └──────────┘   └─────────┘
 ```
 
-### Key Components
+- **mcp_base.py** — generic stdio/HTTP MCP client
+- **registry.py** — discovers tools across all servers
+- **config.py** — loads environment variables via `python-dotenv`
+- **jira_mcp.py / slack_mcp.py / google_calendar_mcp.py** — per-server client subclasses
+- **agent.py** — main CLI entry point; runs Gemini planning (with automatic re-planning when a context-gathering tool like `get-current-time` is needed first), validates the plan against each tool's real JSON schema, executes, and formats output
 
-1. **agent.py** — Main CLI entry point
-   - Parses natural language requests
-   - Orchestrates the MCP client and Gemini planner
-   - Formats and displays results
+## Services
 
-2. **config.py** — Configuration management
-   - Loads environment variables
-   - Supports multiple auth modes
-   - Configures transport selection
+### Jira (via Atlassian Rovo MCP)
 
-3. **Jira MCP Client** — Handles communication
-   - Supports HTTP and stdio transports
-   - Auto-injects cloud ID for tool calls
-   - Manages session lifecycle
+Connects over HTTP to Atlassian's Rovo MCP endpoint.
 
-## Development
+| Variable | Description | Required |
+|---|---|---|
+| `JIRA_EMAIL` | Your Atlassian account email | Yes |
+| `ATLASSIAN_MCP_TOKEN` | API token from id.atlassian.com | Yes |
+| `JIRA_BASE_URL` | Your Jira site URL (e.g. `https://yoursite.atlassian.net`) | Optional |
+| `ROVO_CLOUD_ID` | Cloud ID for Rovo MCP (overrides `JIRA_BASE_URL`) | Recommended |
+| `ROVO_MCP_URL` | Rovo MCP endpoint | Default: `https://mcp.atlassian.com/v1/mcp` |
 
-### Python Agent Development
+The default project key used by the planner is `SCRUM` — set in `agent.py`'s system prompt, change there if your project key differs.
+
+**31 tools** discovered, including `searchJiraIssuesUsingJql`, `getIssue`, `createIssue`, `editJiraIssue`, `addCommentToJiraIssue`, `addWorklogToJiraIssue`.
 
 ```bash
-# Run agent locally
-python agent.py "your request here"
-
-# Debug mode (see planning output)
-python agent.py "list all tools"
+python agent.py "show me all open SCRUM issues"
+python agent.py "create a bug for OAuth failures"
 ```
 
-### Requirements
+### Google Calendar (via `@cocal/google-calendar-mcp`)
+
+This server handles its own OAuth flow — the Python client does **not** manage tokens directly.
+
+**One-time setup:**
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create a project (or use an existing one) and enable the **Google Calendar API**: `APIs & Services → Library → Google Calendar API → Enable`.
+2. Under `APIs & Services → Credentials`, create an OAuth client of type **Desktop app** (not Web application — Desktop apps let Google treat `http://localhost` as a loopback wildcard, avoiding exact port/path matching issues).
+3. Under `APIs & Services → Audience` (formerly "OAuth consent screen"), add your Google account as a **test user** if the app is in testing mode.
+4. Download the OAuth client credentials JSON and save it somewhere referenced by `GOOGLE_OAUTH_CREDENTIALS` below.
+
+| Variable | Description |
+|---|---|
+| `GOOGLE_CALENDAR_MCP_COMMAND` | Command to launch the server, e.g. `npx` |
+| `GOOGLE_CALENDAR_MCP_ARGS` | Args for the command, e.g. `-y @cocal/google-calendar-mcp` |
+| `GOOGLE_OAUTH_CREDENTIALS` | Absolute path to your downloaded OAuth client credentials JSON |
+
+**Connecting an account:**
+
+Either via the agent:
+```bash
+python agent.py "add my google account using manage-accounts, call it 'personal'"
+```
+…then visit the printed `auth_url` in your browser **within the 5-minute window** and complete consent.
+
+Or directly via the package's own CLI (recommended — keeps the local callback server alive in the foreground until you finish, avoiding issues where a short-lived agent process exits before you've completed the browser flow):
+```bash
+npx -y @cocal/google-calendar-mcp auth
+```
+
+Tokens are stored at `~/.config/google-calendar-mcp/tokens.json` (Windows: `C:\Users\<you>\.config\google-calendar-mcp\tokens.json`). In test-mode OAuth apps, tokens expire after 7 days — re-auth with `manage-accounts` (`action: add`) or the `auth` command above.
+
+**13 tools** discovered, including `manage-accounts`, `list-calendars`, `list-events`, `get-current-time`, `create-event`.
+
+```bash
+python agent.py "list my connected google accounts using manage-accounts"
+python agent.py "list my google calendar events for this week"
+```
+
+> Relative dates ("this week," "today") work via automatic two-step planning: the agent first calls `get-current-time`, then re-plans the actual request using that result as grounding context.
+
+### Slack (official Slack MCP server)
+
+Connects over HTTP to Slack's official MCP endpoint.
+
+| Variable | Description | Required |
+|---|---|---|
+| `SLACK_USER_TOKEN` | A Slack user OAuth token (`xoxp-...`) | Yes |
+
+**12 tools** discovered. The planner is instructed to prefer `slack_post_message` for sending messages over `slack_list_channels`.
+
+```bash
+python agent.py "post 'standup at 10am' to #general"
+python agent.py "list my slack channels"
+```
+
+### Gemini Planner
+
+| Variable | Description | Required |
+|---|---|---|
+| `GEMINI_API_KEY` | Google Gemini API key | Yes |
+| `GEMINI_MODEL` | Gemini model, e.g. `gemini-2.5-flash` | No, defaults to `gemini-2.5-flash` |
+
+The planner calls Gemini's `v1beta` endpoint with `responseMimeType: "application/json"` (structured JSON mode). It does **not** use `responseSchema` — an object schema with no declared properties was found to bias the structured decoder toward emitting an empty/trivial `args: {}` regardless of the prompt.
+
+Plans are validated against each tool's real `input_schema` using `jsonschema`. On validation failure, the agent retries up to 3 times with escalating temperature (0.0 → 0.4), feeding Gemini its own validation errors so it can self-correct.
+
+## Usage
+
+```bash
+python agent.py "<natural language request>"
+```
+
+The agent will:
+1. **Discover** all available tools across Jira, Google Calendar, and Slack
+2. **Plan** the best tool(s) using Gemini, validating against real schemas
+3. **Re-plan** automatically if a context-gathering step (like `get-current-time`) is needed first
+4. **Execute** the planned action(s)
+5. **Format** results for readability
+
+## Requirements
 
 - Python 3.8+
-- Node.js 18+ (optional, for legacy TypeScript components)
-- `httpx` — Async HTTP client for Rovo MCP communication
-- `google-generativeai` or direct API calls — For Gemini planning
-- `python-dotenv` — For environment configuration
+- Node.js 18+ (for the Google Calendar MCP server, run via `npx`)
+- `httpx`, `jsonschema`, `python-dotenv`
 
-### Project Structure
+## Project Structure
 
 ```
 .
-├── agent.py           # Main CLI agent
-├── config.py          # Configuration management
-├── package.json       # Node.js dependencies (legacy)
-├── README.md          # This file
-├── .env.example       # Environment template
-└── node_modules/      # TypeScript server (legacy, not used by Python agent)
+├── agent.py                  # Main CLI agent + Gemini planner
+├── config.py                 # Environment variable loading
+├── registry.py                # Tool discovery across all MCP servers
+├── mcp_base.py                # Generic stdio/HTTP MCP client
+├── jira_mcp.py                 # Jira (Rovo) client
+├── google_calendar_mcp.py       # Google Calendar client
+├── slack_mcp.py                  # Slack client
+├── README.md
+└── .env.example
 ```
 
-## Technical Details
+## Notes
 
-- **MCP Protocol** — Uses Model Context Protocol to communicate with Atlassian Rovo MCP
-- **Transport** — Supports both HTTP (direct) and stdio (subprocess) transports
-- **Authentication**:
-  - **Basic Auth** — Email + API token (no browser needed)
-  - **Bearer Token** — Direct token-based auth
-  - **OAuth** — Browser-based login via mcp-remote
-- **LLM Planner** — Google Gemini 2.5 Flash analyzes requests and selects optimal tools
-- **Cloud ID Injection** — Automatically injects cloudId into all tool calls, simplifying requests
-- **Async/Await** — Full async implementation for fast, non-blocking I/O
-- **Dynamic Tool Discovery** — Automatically adapts to new Rovo MCP tools without code changes
-
-## Example Workflows
-
-### 1. Create and Link an Issue
-```bash
-python agent.py "create a critical bug about login failures"
-```
-
-### 2. Search and Update
-```bash
-python agent.py "find all SCRUM issues assigned to me"
-python agent.py "update SCRUM-456 to in progress and add comment saying started work"
-```
-
-### 3. Bulk Operations
-```bash
-python agent.py "show all high priority issues in the current sprint"
-```
+- This project is separate from any other repo using similar filenames (e.g. an internship PPM/LangGraph project) — different codebase, coincidental naming.
+- `mcp_base.py`'s stdio clients spawn subprocesses with `env=os.environ.copy()` — environment variable names must match exactly what each npm package expects, not just what your internal `Config` class calls them.
+- Never paste API keys or tokens into terminal output, logs, or chat sessions in plaintext. If a key is ever exposed, rotate it immediately at its source (e.g. Google AI Studio for Gemini keys).
