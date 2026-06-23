@@ -46,7 +46,7 @@ async def _call_gemini(prompt: str, temperature: float = 0.0) -> dict:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": temperature,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 4096,
             "responseMimeType": "application/json",
         },
     }
@@ -111,10 +111,20 @@ async def plan_actions(tools: list[dict], user_request: str, context: str = "") 
         "and the user asks to add an account, the correct args is:\n"
         '    {"action": "add", "account_id": "work"}\n'
         "NOT an empty object — an empty args object is only valid for tools with zero required arguments.\n"
+        "Only include actions that directly and completely fulfill the user's specific request. "
+        "NEVER include additional actions for tools the user did not ask about, and NEVER include "
+        "example, placeholder, demo, or speculative actions — even if a tool seems related or useful. "
+        "If the user's request maps to exactly one action, return exactly one action in the array. "
+        "Do not use placeholder values like 'C1234567890' or 'example message' — every arg value must "
+        "be derived from the actual user request.\n"
         "The default Jira project key is SCRUM — only use this for Jira requests.\n"
         "For Slack, use slack_post_message to send messages, not slack_list_channels.\n"
-        'Return JSON in the form: {"actions":[{"server":"server_name","tool":"tool_name","args":{...}}]}'
-    )
+        "If the user is asking what tools, actions, or capabilities are available — rather than "
+        "asking you to perform an action — do not return an actions array. Instead return "
+        '{"answer": "<a plain-text list of the relevant tool names, pulled from the Available '
+        'tools list above>"}.\n'
+        'Otherwise, return JSON in the form: {"actions":[{"server":"server_name","tool":"tool_name","args":{...}}]}'
+    )   
     base_prompt = f"{system}\n\nAvailable tools:\n{tool_list}{context_block}\n\nUser request: {user_request}"
 
     prompt = base_prompt
@@ -125,6 +135,9 @@ async def plan_actions(tools: list[dict], user_request: str, context: str = "") 
     for attempt in range(max_attempts):
         temp = 0.0 if attempt == 0 else 0.4
         parsed = await _call_gemini(prompt, temperature=temp)
+        if "answer" in parsed:
+            print(parsed["answer"])
+            return []
         actions = parsed.get("actions", [])
         errors = _validate_actions(actions, tool_schemas)
 
